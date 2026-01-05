@@ -113,6 +113,7 @@ export default function AdminOrders() {
       if (plant) {
         await db.plants.update(item.productId, {
           quantity: plant.quantity + 1,
+          sellingQuantity: Math.max((plant.sellingQuantity || 0) - 1, 0),
         });
       }
     } else {
@@ -120,6 +121,7 @@ export default function AdminOrders() {
       if (plant) {
         await db.plants.update(item.productId, {
           quantity: plant.quantity + 1,
+          sellingQuantity: Math.max((plant.sellingQuantity || 0) - 1, 0),
         });
       }
     }
@@ -160,6 +162,7 @@ export default function AdminOrders() {
 
     await db.plants.update(plant.id, {
       quantity: Math.max(freshPlant.quantity - 1, 0),
+      sellingQuantity: (freshPlant.sellingQuantity || 0) + 1,
     });
 
     recalcTotal();

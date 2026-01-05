@@ -9,6 +9,7 @@ export async function createOrder(userId, items, total) {
   });
 }
 
+
 export async function getOrders(userId) {
   return await db.orders.where("userId").equals(userId).toArray();
 }

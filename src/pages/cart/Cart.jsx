@@ -71,8 +71,13 @@ export default function Cart() {
       const plant = await db.plants.get(item.productId);
       if (!plant) continue;
 
+      // Calculate original quantity (for existing plants that might not have it set)
+      const originalQuantity = plant.originalQuantity || (plant.quantity + (plant.sellingQuantity || 0));
+      
       await db.plants.update(item.productId, {
         quantity: Math.max(plant.quantity - item.qty, 0),
+        sellingQuantity: (plant.sellingQuantity || 0) + item.qty,
+        originalQuantity: originalQuantity,
       });
 
       await db.orderItems.add({

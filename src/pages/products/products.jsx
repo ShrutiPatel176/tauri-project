@@ -202,11 +202,25 @@ export default function Products() {
   const handleSaveOrder = async () => {
     if (!editingOrder) return;
 
+    // Get original order items to calculate quantity differences
+    const originalItems = await db.orderItems
+      .where("orderId")
+      .equals(editingOrder.id)
+      .toArray();
+
+    // Delete original order items
     await db.orderItems
       .where("orderId")
       .equals(editingOrder.id)
       .delete();
 
+    // Create a map of original quantities by product ID
+    const originalQuantities = {};
+    originalItems.forEach(item => {
+      originalQuantities[item.productId] = item.qty;
+    });
+
+    // Add new order items and update selling quantities
     for (const item of editItems) {
       await db.orderItems.add({
         orderId: editingOrder.id,
@@ -215,6 +229,20 @@ export default function Products() {
         qty: item.qty,
         price: item.price,
       });
+
+      // Calculate the difference in quantity
+      const originalQty = originalQuantities[item.productId] || 0;
+      const qtyDifference = item.qty - originalQty;
+
+      // Update selling quantity if there's an increase
+      if (qtyDifference > 0) {
+        const plant = await db.plants.get(item.productId);
+        if (plant) {
+          await db.plants.update(item.productId, {
+            sellingQuantity: (plant.sellingQuantity || 0) + qtyDifference,
+          });
+        }
+      }
     }
 
     await db.orders.update(editingOrder.id, { total: editTotal });

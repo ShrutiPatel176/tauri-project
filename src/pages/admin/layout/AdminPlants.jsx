@@ -1,5 +1,5 @@
 import { useLiveQuery } from "dexie-react-hooks";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { db } from "@/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,23 +21,95 @@ const LOW_STOCK_LIMIT = 5;
 
 export default function AdminPlants() {
   // const plants =
-  //   useLiveQuery(() => db.plants.toArray(), []) || [];
-  const admin = JSON.parse(localStorage.getItem("user"));
-    if (!admin || admin.role !== "admin") {
-    return <p className="p-6">Access denied</p>;
+// 🔹 AUTH CHECK
+const admin = JSON.parse(localStorage.getItem("user"));
+if (!admin || admin.role !== "admin") {
+  return <p className="p-6">Access denied</p>;
+}
+
+// 🔹 FETCH PLANTS (admin-specific + old data)
+const plants =
+  useLiveQuery(() => {
+    return db.plants
+      .filter(
+        (p) =>
+          p.createdByAdminId === admin.id ||
+          !p.createdByAdminId
+      )
+      .toArray();
+  }, [admin.id]) || [];
+
+// 🔹 FORM STATE (CLEAN)
+const [form, setForm] = useState({
+  name: "",
+  price: "",
+  country: "",
+  discount: "",
+  img: "",
+  quantity: "",
+});
+
+const [editingId, setEditingId] = useState(null);
+
+/* ================= IMAGE UPLOAD ================= */
+const handleImageUpload = (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onloadend = () => {
+    setForm((prev) => ({ ...prev, img: reader.result }));
+  };
+  reader.readAsDataURL(file);
+};
+
+/* ================= SAVE ================= */
+const savePlant = async () => {
+  if (!form.name || !form.price || !form.country) {
+    alert("Name, price & country are required");
+    return;
   }
-  const plants =useLiveQuery(() => {
-  return db.plants
-    .filter(
-      p =>
-        p.createdByAdminId === admin.id ||
-        !p.createdByAdminId
-    )
-    .toArray();
-}, [admin.id]) || [];
 
+  const qty = Number(form.quantity || 0);
 
-  const [form, setForm] = useState({
+  if (editingId) {
+    // 🔹 UPDATE EXISTING PLANT
+    const existing = await db.plants.get(editingId);
+
+    await db.plants.update(editingId, {
+      name: form.name,
+      price: Number(form.price),
+      country: form.country.toLowerCase(),
+      discount: Number(form.discount || 0),
+      img: form.img || existing.img,
+      quantity: qty,
+
+      // 🔑 SYSTEM FIELDS
+      originalQuantity: existing.originalQuantity,
+      sellingQuantity:
+        existing.originalQuantity - qty,
+    });
+
+    setEditingId(null);
+  } else {
+    // 🔹 ADD NEW PLANT
+    await db.plants.add({
+      name: form.name,
+      price: Number(form.price),
+      country: form.country.toLowerCase(),
+      discount: Number(form.discount || 0),
+      img: form.img || "/img/default.jpg",
+
+      quantity: qty,
+      originalQuantity: qty,
+      sellingQuantity: 0,
+
+      createdByAdminId: admin.id,
+    });
+  }
+
+  // 🔹 RESET FORM
+  setForm({
     name: "",
     price: "",
     country: "",
@@ -45,81 +117,51 @@ export default function AdminPlants() {
     img: "",
     quantity: "",
   });
+};
 
-  const [editingId, setEditingId] = useState(null);
+/* ================= EDIT ================= */
+const editPlant = (plant) => {
+  setEditingId(plant.id);
+  setForm({
+    name: plant.name,
+    price: plant.price,
+    country: plant.country,
+    discount: plant.discount,
+    img: plant.img,
+    quantity: plant.quantity,
+  });
+};
 
-  /* ================= IMAGE UPLOAD ================= */
-  const handleImageUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+/* ================= DELETE ================= */
+const deletePlant = async (id) => {
+  if (confirm("Delete this plant?")) {
+    await db.plants.delete(id);
+  }
+};
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setForm((prev) => ({ ...prev, img: reader.result }));
-    };
-    reader.readAsDataURL(file);
-  };
+/* ================= LOW STOCK ================= */
+const hasLowStock = plants.some(
+  (p) => p.quantity <= LOW_STOCK_LIMIT
+);
 
-  /* ================= SAVE ================= */
-  const savePlant = async () => {
-    if (!form.name || !form.price || !form.country) {
-      alert("Name, price & country are required");
-      return;
+/* ================= MIGRATION ================= */
+useEffect(() => {
+  async function migrateExistingPlants() {
+    const allPlants = await db.plants.toArray();
+    
+    for (const plant of allPlants) {
+      // If originalQuantity is not set, calculate it from current + sold
+      if (!plant.originalQuantity) {
+        const calculatedOriginal = plant.quantity + (plant.sellingQuantity || 0);
+        await db.plants.update(plant.id, {
+          originalQuantity: calculatedOriginal
+        });
+      }
     }
-
-    const payload = {
-      name: form.name,
-      price: Number(form.price),
-      country: form.country.toLowerCase(),
-      discount: Number(form.discount || 0),
-      img: form.img || "/img/default.jpg",
-      quantity: Number(form.quantity || 0),
-    };
-
-    if (editingId) {
-      await db.plants.update(editingId, payload);
-      setEditingId(null);
-    } else {
-      await db.plants.add({
-  ...payload,
-  createdByAdminId: admin.id,
-});
-
-    }
-
-    setForm({
-      name: "",
-      price: "",
-      country: "",
-      discount: "",
-      img: "",
-      quantity: "",
-    });
-  };
-
-  /* ================= EDIT ================= */
-  const editPlant = (plant) => {
-    setEditingId(plant.id);
-    setForm({
-      name: plant.name,
-      price: plant.price,
-      country: plant.country,
-      discount: plant.discount,
-      img: plant.img,
-      quantity: plant.quantity,
-    });
-  };
-
-  /* ================= DELETE ================= */
-  const deletePlant = async (id) => {
-    if (confirm("Delete this plant?")) {
-      await db.plants.delete(id);
-    }
-  };
-
-  const hasLowStock = plants.some(
-    (p) => p.quantity <= LOW_STOCK_LIMIT
-  );
+  }
+  
+  migrateExistingPlants();
+}, []);
 
   return (
     <div className="min-h-screen bg-green-50 p-6">
@@ -199,6 +241,15 @@ export default function AdminPlants() {
             }
           />
 
+          <Input
+            placeholder="Selling Quantity"
+            type="number"
+            value={form.sellingQuantity}
+            onChange={(e) =>
+              setForm({ ...form, sellingQuantity: e.target.value })
+            }
+          />
+
           {/* IMAGE UPLOAD */}
           <div className="space-y-2 md:col-span-2">
             <Input
@@ -255,12 +306,28 @@ export default function AdminPlants() {
                   {p.country}
                 </p>
 
-                <p className="text-sm">
-                  Quantity:{" "}
-                  <span className="font-semibold">
-                    {p.quantity}
-                  </span>
-                </p>
+                <div className="space-y-2">
+                  <p className="text-sm">
+                    Total Added:{" "}
+                    <span className="font-semibold text-blue-600">
+                      {p.originalQuantity || p.quantity}
+                    </span>
+                  </p>
+                  
+                  <p className="text-sm">
+                    Current Stock:{" "}
+                    <span className="font-semibold text-green-600">
+                      {p.quantity}
+                    </span>
+                  </p>
+                  
+                  <p className="text-sm">
+                    Sold Plants:{" "}
+                    <span className="font-semibold text-orange-600">
+                     {p.originalQuantity - p.quantity}
+                    </span>
+                  </p>
+                </div>
 
                 {/* STATUS BADGE */}
                 {isOut ? (
